@@ -30,12 +30,13 @@ log_interval = 100
 obs_shape = (num_stack, 84, 84)
 num_updates = 1000000
 
-device = 'cuda'
+device = 'cpu'
 
 spearman_corr_coeff_actions = [0, 1, 2, 3, 4, 5, 11, 12]
 
+
 def rgb2gray(image):
-  return np.dot(image[...,:3], [0.299, 0.587, 0.114])
+    return np.dot(image[..., :3], [0.299, 0.587, 0.114])
 
 
 # Necessary for my KFAC implementation.

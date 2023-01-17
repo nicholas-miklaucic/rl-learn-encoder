@@ -1,12 +1,15 @@
 import numpy as np
 import sys
 import pickle
-import tensorflow as tf
+# import tensorflow as tf
+import tensorflow.compat.v1 as tf
+import tf_slim as slim
 from random import shuffle, seed, randint
 import math
 from data import Data
 import os
 from utils_learn import *
+
 
 class LearnModel(object):
     def __init__(self, mode, args=None, model_dir=None):
@@ -29,14 +32,14 @@ class LearnModel(object):
         return tf.layers.batch_normalization(input, training=self.is_train)
 
     def conv_relu_pool(self, input, kernel_shape, bias_shape, stride):
-        weights = tf.get_variable("weights", kernel_shape, \
-            initializer=tf.contrib.layers.xavier_initializer(), \
-            regularizer=tf.contrib.layers.l2_regularizer(self.weight_decay))
-        biases = tf.get_variable("biases", bias_shape, \
-            initializer=tf.constant_initializer(0.1))
+        weights = tf.get_variable("weights", kernel_shape,
+                                  initializer=slim.layers.initializers.xavier_initializer(),
+                                  regularizer=slim.regularizers.l2_regularizer(self.weight_decay))
+        biases = tf.get_variable("biases", bias_shape,
+                                 initializer=tf.constant_initializer(0.1))
         conv = tf.nn.conv2d(input, weights, strides=[1, stride, stride, 1], padding='VALID')
-        pool = tf.nn.max_pool(tf.nn.relu(conv + biases), ksize=[1,2,2,1], \
-            strides=[1,2,2,1], padding='VALID')
+        pool = tf.nn.max_pool(tf.nn.relu(conv + biases), ksize=[1, 2, 2, 1],
+                              strides=[1, 2, 2, 1], padding='VALID')
         return pool
 
     def text_enc_lstm(self, input_text):
@@ -44,10 +47,10 @@ class LearnModel(object):
         lstm_size = self.args.lang_enc_size
         cells = []
         for _ in range(n_layers):
-            cell = tf.contrib.rnn.GRUCell(lstm_size)
+            cell = tf.nn.rnn_cell.GRUCell(lstm_size)
             cells.append(cell)
-        cell = tf.contrib.rnn.MultiRNNCell(cells)
-    
+        cell = tf.nn.rnn_cell.MultiRNNCell(cells)
+
         output, _ = tf.nn.dynamic_rnn(
             cell, input_text, dtype=tf.float32, sequence_length=self.length)
         output_mean = tf.divide(tf.reduce_sum(output, axis=1), tf.tile(tf.expand_dims(
@@ -57,11 +60,11 @@ class LearnModel(object):
     def text_enc_linear(self, input_text):
         input_size = input_text.get_shape().as_list()[-1]
         with tf.variable_scope("text_enc"):
-            dense1_w = tf.get_variable("dense1_w", [input_size, self.args.lang_enc_size], \
-                initializer=tf.contrib.layers.xavier_initializer(), \
-                regularizer=tf.contrib.layers.l2_regularizer(self.weight_decay))
-            dense1_b = tf.get_variable("dense1_b", [self.args.lang_enc_size], \
-                initializer=tf.constant_initializer(0.1))
+            dense1_w = tf.get_variable("dense1_w", [input_size, self.args.lang_enc_size],
+                                       initializer=slim.layers.initializers.xavier_initializer(),
+                                       regularizer=slim.regularizers.l2_regularizer(self.weight_decay))
+            dense1_b = tf.get_variable("dense1_b", [self.args.lang_enc_size],
+                                       initializer=tf.constant_initializer(0.1))
             l1 = tf.add(tf.matmul(input_text, dense1_w), dense1_b)
             return l1
 
@@ -75,20 +78,20 @@ class LearnModel(object):
             for l in range(n_layers):
                 w_name = "dense{}_w".format(l)
                 b_name = "dense{}_b".format(l)
-                w = tf.get_variable(w_name, [in_dim[l], out_dim[l]], \
-                        initializer=tf.contrib.layers.xavier_initializer(), \
-                        regularizer=tf.contrib.layers.l2_regularizer(self.weight_decay))
-                b = tf.get_variable(b_name, [out_dim[l]], \
-                        initializer=tf.constant_initializer(0.1))
+                w = tf.get_variable(w_name, [in_dim[l], out_dim[l]],
+                                    initializer=slim.layers.initializers.xavier_initializer(),
+                                    regularizer=slim.regularizers.l2_regularizer(self.weight_decay))
+                b = tf.get_variable(b_name, [out_dim[l]],
+                                    initializer=tf.constant_initializer(0.1))
                 ws.append(w)
                 bs.append(b)
 
         out = input_enc
         for l in range(n_layers-1):
-            out = tf.nn.relu(tf.add(tf.matmul(out, ws[l]), \
-                    bs[l]))
+            out = tf.nn.relu(tf.add(tf.matmul(out, ws[l]),
+                                    bs[l]))
             out = self.batch_norm(out)
-            out = tf.nn.dropout(out, keep_prob=dropout)
+            out = tf.nn.dropout(out, rate=1-dropout)
         out = tf.add(tf.matmul(out, ws[-1]), bs[-1])
 
         return out
@@ -98,8 +101,8 @@ class LearnModel(object):
             self.lang = tf.placeholder(tf.int32, [None, MAX_SENT_LEN])
             self.length = tf.placeholder(tf.int32, None)
             emb_size = 50
-            word_embeddings = tf.get_variable("word_embeddings", [ONEHOT_VOCAB_SIZE, emb_size], \
-                    initializer=tf.contrib.layers.xavier_initializer())
+            word_embeddings = tf.get_variable("word_embeddings", [ONEHOT_VOCAB_SIZE, emb_size],
+                                              initializer=slim.layers.initializers.xavier_initializer())
             lang_emb = tf.nn.embedding_lookup(word_embeddings, self.lang)
             text_encoded = self.text_enc_lstm(lang_emb)
             self.lang_vec = lang_emb
@@ -121,7 +124,7 @@ class LearnModel(object):
     def build_graph(self):
         MAX_SENT_LEN = 20
         self.weight_decay = tf.constant(self.args.weight_decay, dtype=tf.float32)
-        
+
         self.dropout = tf.placeholder_with_default(1.0, shape=())
         self.is_train = tf.placeholder(tf.bool)
 
@@ -137,7 +140,8 @@ class LearnModel(object):
         self.logits = self.mlp(self.action_text, 2, "classifier", dropout=self.dropout)
 
         label_one_hot = tf.one_hot(self.labels, 2)
-        self.loss = tf.reduce_mean(tf.losses.softmax_cross_entropy(label_one_hot, self.logits))
+        self.loss = tf.reduce_mean(
+            tf.losses.softmax_cross_entropy(label_one_hot, self.logits))
         self.predictions = tf.argmax(self.logits, axis=1)
 
         self.grad_lang = tf.gradients(self.logits[:, 1], self.lang_vec)
@@ -151,7 +155,7 @@ class LearnModel(object):
         att_k_decay_factor = 0.5
 
         self.lr = tf.train.exponential_decay(
-            initial_learning_rate, self.global_step, decay_steps, learning_rate_decay_factor, 
+            initial_learning_rate, self.global_step, decay_steps, learning_rate_decay_factor,
             staircase=True)
 
         opt = tf.train.AdamOptimizer(self.lr)
@@ -162,21 +166,21 @@ class LearnModel(object):
         self.init = tf.global_variables_initializer()
 
     def pad_seq_feature(self, seq, length):
-            seq = np.asarray(seq)
-            if length < np.size(seq, 0):
-                    return seq[:length]
-            dim = np.size(seq, 1)
-            result = np.zeros((length, dim))
-            result[0:seq.shape[0], :] = seq
-            return result
+        seq = np.asarray(seq)
+        if length < np.size(seq, 0):
+            return seq[:length]
+        dim = np.size(seq, 1)
+        result = np.zeros((length, dim))
+        result[0:seq.shape[0], :] = seq
+        return result
 
     def pad_seq_onehot(self, seq, length):
-            seq = np.asarray(seq)
-            if length < np.size(seq, 0):
-                    return seq[:length]
-            result = np.zeros(length)
-            result[0:seq.shape[0]] = seq
-            return result
+        seq = np.asarray(seq)
+        if length < np.size(seq, 0):
+            return seq[:length]
+        result = np.zeros(length)
+        result[0:seq.shape[0]] = seq
+        return result
 
     def get_batch_lang_lengths(self, lang_list):
         if self.args.lang_enc == 'onehot':
@@ -185,7 +189,7 @@ class LearnModel(object):
             for i, l in enumerate(lang_list):
                 lengths.append(len(l))
                 langs.append(np.array(self.pad_seq_onehot(l, MAX_SENT_LEN)))
-            
+
             langs = np.array(langs)
             lengths = np.array(lengths)
             return langs, lengths
@@ -195,7 +199,7 @@ class LearnModel(object):
             for i, l in enumerate(lang_list):
                 lengths.append(len(l))
                 langs.append(np.array(self.pad_seq_feature(l, MAX_SENT_LEN)))
-            
+
             langs = np.array(langs)
             lengths = np.array(lengths)
             return langs, lengths
@@ -213,14 +217,14 @@ class LearnModel(object):
 
         lang_list, length_list = self.get_batch_lang_lengths(lang_list)
 
-        batch_dict =    {    
-                            self.action: action_list, 
-                            self.lang: lang_list, 
-                            self.length: length_list,
-                            self.dropout: self.args.dropout,
-                            self.labels: label_list,
-                            self.is_train: 1,
-                        }
+        batch_dict = {
+            self.action: action_list,
+            self.lang: lang_list,
+            self.length: length_list,
+            self.dropout: self.args.dropout,
+            self.labels: label_list,
+            self.is_train: 1,
+        }
 
         fetches = [self.predictions, self.loss, self.train_op, self.extra_update_ops]
         pred, loss, _, _,  = self.sess.run(fetches, batch_dict)
@@ -235,13 +239,13 @@ class LearnModel(object):
 
         lang_list, length_list = self.get_batch_lang_lengths(lang_list)
 
-        batch_dict =    {    
-                            self.action: action_list, 
-                            self.lang: lang_list, 
-                            self.length: length_list,
-                            self.labels: label_list,
-                            self.is_train: 0,
-                        }
+        batch_dict = {
+            self.action: action_list,
+            self.lang: lang_list,
+            self.length: length_list,
+            self.labels: label_list,
+            self.is_train: 0,
+        }
 
         fetches = [self.predictions, self.loss]
         pred, loss = self.sess.run(fetches, batch_dict)
@@ -260,16 +264,15 @@ class LearnModel(object):
                 batch_loss, batch_pred, batch_labels = self.run_batch_test(data, start)
 
             start += self.args.batch_size
-            loss += batch_loss    
+            loss += batch_loss
             pred += list(batch_pred)
             labels += list(batch_labels)
 
         correct = np.sum([1.0 if x == y else 0.0 for (x, y) in zip(pred, labels)])
         return correct / len(data), loss / len(data)
 
-    def train_network(self):
+    def train_network(self, n_epochs=50):
         steps_per_epoch = int(math.ceil(len(self.data.train_data) / self.args.batch_size))
-        n_epochs = 50
 
         pickle.dump(self.args, open(os.path.join(self.args.save_path, 'args.pkl'), 'wb'))
         saver = tf.train.Saver(max_to_keep=None)
@@ -296,8 +299,8 @@ class LearnModel(object):
                 acc_train, loss_train = self.run_epoch(self.data.train_data, is_train=1)
                 acc_valid, loss_valid = self.run_epoch(self.data.valid_data, is_train=0)
 
-                print('Epoch: %d \t TL: %f \t VL: %f \t TA: %f \t VA: %f' % 
-                    (epoch, loss_train, loss_valid, acc_train, acc_valid))
+                print('Epoch: %d \t TL: %f \t VL: %f \t TA: %f \t VA: %f' %
+                      (epoch, loss_train, loss_valid, acc_train, acc_valid))
 
                 if acc_valid > best_val_acc and self.args.save_path:
                     saver.save(self.sess, os.path.join(self.args.save_path, 'model'))
@@ -310,14 +313,11 @@ class LearnModel(object):
             action_list /= s
         lang_list, length_list = self.get_batch_lang_lengths(lang_list)
 
-        input_dict =    {
-                            self.action: action_list,
-                            self.lang: lang_list,
-                            self.length: length_list,
-                            self.is_train: False,
-                        }
-        logits = self.sess.run(self.logits, feed_dict = input_dict)
+        input_dict = {
+            self.action: action_list,
+            self.lang: lang_list,
+            self.length: length_list,
+            self.is_train: False,
+        }
+        logits = self.sess.run(self.logits, feed_dict=input_dict)
         return logits
-
-
-

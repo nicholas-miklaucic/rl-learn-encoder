@@ -1,19 +1,24 @@
-import gym
 import sys
-import random
-import numpy as np
-from scipy.misc import imresize
-from utils import *
-from PIL import Image
-from copy import deepcopy
-import tensorflow as tf
-from itertools import groupby
-import pdb
-import pickle
-import torch
 sys.path.insert(0, 'learn/')
+sys.path.insert(0, 'encoder/')
+
+import torch
+import pickle
+import pdb
+from itertools import groupby
+import tensorflow as tf
+from copy import deepcopy
+from PIL import Image
+from utils import *
+from scipy.misc import imresize
+import numpy as np
+import random
+import gym
 from learn_model import LearnModel
+from encoder_model import EncoderModel
 from tasks import *
+
+
 
 class GymEnvironment(object):
     def __init__(self, args, gamma):
@@ -69,14 +74,14 @@ class GymEnvironment(object):
         return int(self.env.ale.getRAM()[49])
 
     def save_state(self, filename):
-            state = self.env.clone_full_state()
-            np.save(filename, state)
-            print ('File written : {}'.format(filename))
+        state = self.env.clone_full_state()
+        np.save(filename, state)
+        print('File written : {}'.format(filename))
 
     def load_state(self, filename):
-            state = np.load(filename)
-            self.env.restore_full_state(state)
-            self._step(0)
+        state = np.load(filename)
+        self.env.restore_full_state(state)
+        self._step(0)
 
     def repeat_action(self, action, n=1):
         for _ in range(n):
@@ -120,7 +125,7 @@ class GymEnvironment(object):
             self.task = Task14(self)
         elif self.args.expt_id == 15:
             self.task = Task15(self)
-            
+
         self._step(0)
         self._step(0)
         self._step(0)
@@ -167,7 +172,7 @@ class GymEnvironment(object):
 
         if start_lives > self.lives:
             self.terminal = True
-        
+
         if not self.terminal:
             goal_reached = self.task.finished()
         else:
@@ -184,19 +189,26 @@ class GymEnvironment(object):
             self.reward += lang_reward
         if self.n_steps > MAX_STEPS:
             self.terminal = True
-        
+
         if self.terminal:
             self.reset()
 
         return self.state, goal_reached
 
     def setup_language_network(self):
-        self.lang_net_graph = tf.Graph()
-        with self.lang_net_graph.as_default():
-            self.lang_network = LearnModel('predict', None, self.args.model_dir)
         sentence_id = (self.args.expt_id-1) * 3 + (self.args.descr_id-1)
-        lang_data = pickle.load(open('./data/test_lang_data.pkl', 'rb'), encoding='bytes')
-        self.lang = lang_data[sentence_id][self.args.lang_enc]
+        if self.args.lang_net == 'learn':
+            self.lang_net_graph = tf.Graph()
+            with self.lang_net_graph.as_default():
+                self.lang_network = LearnModel('predict', None, self.args.model_dir)
+
+            lang_data = pickle.load(open('./data/test_lang_data.pkl', 'rb'), encoding='bytes')
+            self.lang = lang_data[sentence_id][self.args.lang_enc]
+        elif self.args.lang_net == 'embed':
+            embs = np.load('encoder/test_emb.npy')
+            self.lang = embs[sentence_id]
+            self.lang_net_graph = tf.Graph()
+            self.lang_network = EncoderModel()
 
     def compute_language_reward(self):
         if self.n_steps < 2:
@@ -211,7 +223,8 @@ class GymEnvironment(object):
             e_x = np.exp(logits - np.max(logits))
             self.potentials_list.append(e_x[1] - e_x[0] + self.args.noise * np.random.normal())
 
-        self.action_vectors_list.append(list(self.action_vector[k] for k in spearman_corr_coeff_actions))
+        self.action_vectors_list.append(
+            list(self.action_vector[k] for k in spearman_corr_coeff_actions))
         self.rewards_list.append(self.potentials_list[-1])
 
         if len(self.potentials_list) > 1:
@@ -219,4 +232,3 @@ class GymEnvironment(object):
             return lang_result
         else:
             return 0.
-
